@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hackathon Timer</title>
+  <link rel="stylesheet" href="css/style.css?v=4">
+</head>
+<body>
+<div id="app">
+
+  <!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
+  <header>
+    <div class="logo">Hack<span>Timer</span></div>
+
+    <div class="header-meta">
+      <div class="round-badge">
+        ROUND <strong id="roundCurrent">1</strong> OF <strong id="roundTotal">16</strong>
+      </div>
+    </div>
+
+    <div class="header-btns">
+      <button class="hdr-btn warn" onclick="SettingsPanel.quickSkipPrompt()">⚡ Jump to Round</button>
+      <button class="hdr-btn" onclick="SettingsPanel.toggleSettings()">⚙ Settings</button>
+    </div>
+  </header>
+
+  <!-- ══ MAIN ════════════════════════════════════════════════════════════════ -->
+  <main>
+
+    <!-- Timer -->
+    <div class="timer-block">
+      <div class="phase-label" id="phaseLabel" style="color:var(--blue)">● PITCHING</div>
+      <div class="timer-display pitch" id="timerDisplay">04:00</div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="progressFill"
+             style="width:100%;background:var(--blue)"></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button class="btn btn-start" id="startBtn" onclick="startTimer()">Start</button>
+      <button class="btn btn-pause" id="pauseBtn" onclick="pauseTimer()" disabled>Pause</button>
+      <button class="btn btn-skip"  onclick="skipToNextRound()">⏭ Skip</button>
+      <button class="btn btn-reset" onclick="resetTimer()">Reset</button>
+    </div>
+
+    <!-- Judge Stations -->
+    <div class="section-wrap">
+      <div class="section-label">// Judge Stations — Current Round</div>
+      <div class="judge-cards" id="judgeCards"></div>
+    </div>
+
+    <!-- Round Progress -->
+    <div class="section-wrap">
+      <div class="section-label">// Round Progress — click any dot to jump</div>
+      <div class="schedule-dots" id="scheduleDots"></div>
+    </div>
+
+  </main>
+</div><!-- #app -->
+
+
+<!-- ══ SETTINGS PANEL ═══════════════════════════════════════════════════════ -->
+<div class="settings-overlay" id="settingsOverlay"
+     onclick="SettingsPanel.closeOnBackdrop(event)">
+  <div class="settings-panel">
+    <div class="settings-title">Settings</div>
+
+    <div class="settings-tabs">
+      <button class="tab-btn active"   onclick="SettingsPanel.switchTab('general', this)">General</button>
+      <button class="tab-btn"          onclick="SettingsPanel.switchTab('teams', this)">Teams</button>
+      <button class="tab-btn"          onclick="SettingsPanel.switchTab('sounds', this); SettingsPanel.buildSoundPanel()">Sounds</button>
+      <button class="tab-btn"          onclick="SettingsPanel.switchTab('recovery', this)">Recovery</button>
+    </div>
+
+    <!-- GENERAL TAB -->
+    <div class="tab-content active" id="tab-general">
+      <div class="setting-group">
+        <label class="setting-label">Number of Judges</label>
+        <input type="number" class="setting-input" id="settingJudges" min="1" max="10" value="3">
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">Number of Teams / Rounds</label>
+        <input type="number" class="setting-input" id="settingTeams" min="1" max="60" value="16">
+        <div class="setting-desc">Changing this rebuilds the team list while preserving existing names.</div>
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">Pitch Duration (seconds)</label>
+        <input type="number" class="setting-input" id="settingPitch" min="10" max="1800" value="240">
+        <div class="setting-desc">Default: 240 = 4 min. 1-min warning plays at 60 s remaining.</div>
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">Transition Duration (seconds)</label>
+        <input type="number" class="setting-input" id="settingShift" min="3" max="120" value="10">
+        <div class="setting-desc">Music plays continuously during this window.</div>
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">Judge Names (comma-separated)</label>
+        <input type="text" class="setting-input" id="settingJudgeNames" value="Judge 1,Judge 2,Judge 3">
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">Judge Starting Team (0-based index, comma-separated)</label>
+        <input type="text" class="setting-input" id="settingJudgeOffsets" value="0, 5, 10">
+        <div class="setting-desc">
+          Which team each judge starts with on Round 1, as a position in the team list (0 = first team).
+          <br>Example: <code style="color:var(--blue)">0, 5, 10</code> → Judge 1 starts with team #1 (Iris), Judge 2 starts with team #6 (QuadS), Judge 3 starts with team #11 (LEC Girlies). Teams between offsets wait in that judge's queue.
+        </div>
+      </div>
+      <button class="btn-primary" onclick="applyGeneralSettings()">Apply &amp; Reset</button>
+    </div>
+
+    <!-- TEAMS TAB -->
+    <div class="tab-content" id="tab-teams">
+      <div class="setting-group">
+        <label class="setting-label">Bulk Paste (one name per line)</label>
+        <textarea class="setting-textarea" id="teamBulkPaste" rows="5"
+                  placeholder="Paste team names here, one per line…"></textarea>
+        <button class="btn-outline" style="margin-top:8px" onclick="SettingsPanel.bulkLoadTeamNames()">
+          ⬇ Load from Paste
+        </button>
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">Edit Individual Names</label>
+        <div class="setting-desc" style="margin-bottom:10px">
+          Names appear on judge cards exactly as typed.
+        </div>
+        <div class="team-name-list" id="teamNameList"></div>
+      </div>
+      <button class="btn-outline" onclick="SettingsPanel.saveTeamNames()">✓ Save Names</button>
+    </div>
+
+    <!-- SOUNDS TAB -->
+    <div class="tab-content" id="tab-sounds">
+      <div class="setting-desc" style="margin-bottom:16px;line-height:1.6">
+        Three sound events. Choose <strong>Built-in Synth</strong> or upload your own
+        <strong>audio file</strong> (mp3, wav, ogg). Use ▶ to preview each one.
+      </div>
+      <div id="soundSlotList"></div>
+    </div>
+
+    <!-- RECOVERY TAB -->
+    <div class="tab-content" id="tab-recovery">
+      <div class="recovery-box">
+        <div class="recovery-title">⚡ Crash Recovery</div>
+        <div class="skip-row">
+          <input type="number" class="skip-number-input" id="skipRoundInput"
+                 min="1" value="1" placeholder="8">
+          <button class="skip-go-btn" onclick="SettingsPanel.jumpFromPanel()">Jump ▶</button>
+        </div>
+        <div class="skip-desc">
+          If the browser was closed mid-session, enter the round you were on and
+          jump straight back. Timer starts paused, ready to resume.
+        </div>
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">Crash Notes</label>
+        <textarea class="setting-textarea" id="crashNotes" rows="4"
+                  placeholder="e.g. Crashed mid-round 8, ~1:30 left on pitch…"></textarea>
+        <div class="setting-desc">Quick scratchpad — jot down where you stopped.</div>
+      </div>
+    </div>
+
+  </div><!-- .settings-panel -->
+</div><!-- .settings-overlay -->
+
+
+<!-- ══ TOAST ════════════════════════════════════════════════════════════════ -->
+<div class="toast" id="toast"></div>
+
+
+<!-- ══ DONE SCREEN ══════════════════════════════════════════════════════════ -->
+<div class="done-screen" id="doneScreen">
+  <div class="done-title">Session Complete</div>
+  <div class="done-sub">All <span id="doneTeams">16</span> teams have pitched — all rounds done</div>
+  <button class="done-reset" onclick="resetTimer(); UI.hideDone()">Reset Session</button>
+</div>
+
+
+<!-- ══ SCRIPTS (order matters) ══════════════════════════════════════════════ -->
+<script src="js/sounds.js?v=4"></script>
+<script src="js/timer.js?v=4"></script>
+<script src="js/ui.js?v=4"></script>
+<script src="js/settings.js?v=4"></script>
+<script>
+  // ── Boot ───────────────────────────────────────────────────────────────────
+  state.totalRounds = config.numTeams;
+  UI.renderAll();
+</script>
+
+</body>
+</html>
