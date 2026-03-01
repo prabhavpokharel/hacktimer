@@ -1,88 +1,46 @@
 /* ============================================================
    HACKATHON TIMER — js/timer.js
-   Core state machine: pitch → shift → pitch → ... → done
 
-   KEY CONCEPTS
-   ─────────────
-   judgeOffsets[j]  = 0-based index into teamNames[] of the FIRST
-                      team that judge j sees in Round 1.
+   SPEED-DATING FORMAT
+   ───────────────────
+   Every team visits EVERY judge. 16 teams × 3 judges.
 
-   Each judge owns a contiguous "lane" of teams:
-     Judge 0 → teams at indices [offsets[0], offsets[1])
-     Judge 1 → teams at indices [offsets[1], offsets[2])
-     Judge 2 → teams at indices [offsets[2], numTeams)   (wraps to cover rest)
+   In round r (1-based), judge j sees:
+     teamIndex = (judgeOffsets[j] + r - 1) % numTeams   (0-based)
 
-   queueSize[j]  = number of teams in that lane.
-   totalRounds   = max(queueSizes)   ← session ends here, NOT at numTeams.
+   totalRounds = numTeams  (16 rounds so every team sees every judge)
 
-   In each round r (0-based):
-     • Judge j pitches team at laneOffset + r  (if r < queueSize[j], else idle)
-
-   The "waiting" list for judge j in round r shows ONLY teams at
-   positions r+1, r+2, … queueSize[j]-1 — never teams already done.
+   The offset staggers the starting position:
+     Round 1:  J1=Iris(0), J2=QuadS(5), J3=LEC Girlies(10)
+     Round 7:  J1=Royal Hogs, J2=Team Subharambha, J3=Iris
+     Round 16: every judge sees their last remaining team
    ============================================================ */
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const config = {
   numJudges:     3,
   numTeams:      16,
-  pitchDuration: 240,   // 4 minutes default
+  pitchDuration: 240,
   shiftDuration: 10,
   judgeNames:    ['Judge 1', 'Judge 2', 'Judge 3'],
-  // 0-based start index in teamNames[] for each judge
-  // Judge 1 → Iris (idx 0), Judge 2 → QuadS (idx 5), Judge 3 → LEC Girlies (idx 10)
-  judgeOffsets:  [0, 5, 10],
+  judgeOffsets:  [0, 5, 10],   // 0-based start index per judge
 };
 
 // ── State ────────────────────────────────────────────────────────────────────
 const state = {
-  phase:       'pitch',   // 'pitch' | 'shift'
+  phase:       'pitch',
   timeLeft:    240,
-  round:       1,         // 1-based, goes up to totalRounds
-  totalRounds: 1,         // set properly after first generateSchedule()
+  round:       1,
+  totalRounds: 16,   // always = numTeams
   running:     false,
 };
 
 let _intervalId = null;
 
-// ── Schedule ──────────────────────────────────────────────────────────────────
-// Returns { queueSizes[], totalRounds }
-// schedule[][] is NOT stored — the queue is computed live in ui.js from
-// config.judgeOffsets + queueSizes + state.round.
-function buildScheduleMeta(numTeams, numJudges, judgeOffsets) {
-  const offsets = (judgeOffsets && judgeOffsets.length === numJudges)
-    ? judgeOffsets.slice()
-    : Array.from({ length: numJudges }, (_, j) => Math.round(j * numTeams / numJudges));
-
-  // Lane size = distance between consecutive offsets (last judge wraps to end)
-  const queueSizes = offsets.map((off, j) => {
-    if (j < numJudges - 1) {
-      // distance to next judge's start
-      return offsets[j + 1] - off;
-    } else {
-      // last judge takes the remaining teams
-      return numTeams - off;
-    }
-  });
-
-  // Validate: sizes must all be > 0 and sum to numTeams
-  const valid = queueSizes.every(s => s > 0) && queueSizes.reduce((a, b) => a + b, 0) === numTeams;
-  if (!valid) {
-    // Fallback: equal distribution
-    const base = Math.floor(numTeams / numJudges);
-    return {
-      queueSizes: Array.from({ length: numJudges }, (_, j) =>
-        j < numTeams % numJudges ? base + 1 : base),
-      totalRounds: Math.ceil(numTeams / numJudges),
-    };
-  }
-
-  return { queueSizes, totalRounds: Math.max(...queueSizes) };
+// ── Pure helper: which team (0-based idx) is at judge j in round r ────────────
+function teamAtJudge(j, r) {
+  return (config.judgeOffsets[j] + r - 1) % config.numTeams;
 }
-
-// Live schedule metadata — updated whenever settings change
-let scheduleMeta = buildScheduleMeta(config.numTeams, config.numJudges, config.judgeOffsets);
-state.totalRounds = scheduleMeta.totalRounds;
 
 // ── Tick ─────────────────────────────────────────────────────────────────────
 function tick() {
@@ -95,21 +53,15 @@ function tick() {
   if (state.timeLeft <= 0) {
     if (state.phase === 'pitch') {
       SoundEngine.playPitchEnd();
-
       if (state.round >= state.totalRounds) {
-        // ── ALL ROUNDS DONE ──
         _stopInterval();
         UI.showDone();
         return;
       }
-
-      // Start transition period
       state.phase    = 'shift';
       state.timeLeft = config.shiftDuration;
       SoundEngine.startTransition();
-
     } else {
-      // Transition over → next pitch round
       SoundEngine.stopTransition();
       state.round++;
       state.phase    = 'pitch';
@@ -134,7 +86,7 @@ function pauseTimer() {
   if (!state.running) return;
   _stopInterval();
   if (state.phase === 'shift') SoundEngine.stopTransition();
-  const btn = document.getElementById('startBtn');
+  const btn       = document.getElementById('startBtn');
   btn.disabled    = false;
   btn.textContent = 'RESUME';
 }
@@ -145,8 +97,8 @@ function resetTimer() {
   state.phase       = 'pitch';
   state.timeLeft    = config.pitchDuration;
   state.round       = 1;
-  state.totalRounds = scheduleMeta.totalRounds;
-  const btn = document.getElementById('startBtn');
+  state.totalRounds = config.numTeams;
+  const btn       = document.getElementById('startBtn');
   btn.disabled    = false;
   btn.textContent = 'START';
   UI.renderAll();
@@ -164,16 +116,11 @@ function skipToNextRound() {
   const wasRunning = state.running;
   _stopInterval();
   SoundEngine.stopTransition();
-
-  if (state.round >= state.totalRounds) {
-    UI.showDone();
-    return;
-  }
-
+  if (state.round >= state.totalRounds) { UI.showDone(); return; }
   state.round++;
   state.phase    = 'pitch';
   state.timeLeft = config.pitchDuration;
-  const btn = document.getElementById('startBtn');
+  const btn       = document.getElementById('startBtn');
   btn.disabled    = false;
   btn.textContent = 'START';
   UI.renderAll();
@@ -191,7 +138,7 @@ function jumpToRound(targetRound) {
   state.round    = targetRound;
   state.phase    = 'pitch';
   state.timeLeft = config.pitchDuration;
-  const btn = document.getElementById('startBtn');
+  const btn       = document.getElementById('startBtn');
   btn.disabled    = false;
   btn.textContent = 'START';
   UI.renderAll();
@@ -216,7 +163,6 @@ function applyGeneralSettings() {
     return (!isNaN(v) && v >= 0 && v < teams) ? v : Math.round(i * teams / judges);
   });
 
-  // Apply to config
   config.numJudges     = judges;
   config.numTeams      = teams;
   config.pitchDuration = pitch;
@@ -224,14 +170,9 @@ function applyGeneralSettings() {
   config.judgeNames    = judgeNames;
   config.judgeOffsets  = judgeOffsets;
 
-  // Recompute schedule metadata
-  scheduleMeta = buildScheduleMeta(teams, judges, judgeOffsets);
-
-  // Resize teamNames preserving existing names
   while (teamNames.length < teams) teamNames.push(`Team ${teamNames.length + 1}`);
   teamNames.splice(teams);
 
-  // Sync UI inputs
   document.getElementById('settingJudgeNames').value   = judgeNames.join(', ');
   document.getElementById('settingJudgeOffsets').value = judgeOffsets.join(', ');
 
